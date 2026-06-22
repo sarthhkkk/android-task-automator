@@ -57,6 +57,17 @@ class Device:
         self.d.screen_on()
         self.d.swipe(500, 2000, 500, 1000, 0.2)
 
+    def dismiss_keyguard(self):
+        self.d.shell(["wm", "dismiss-keyguard"])
+
+    def dump_ui(self, path=None):
+        if path is None:
+            path = os.path.join(self.screenshot_dir, f"ui_dump_{datetime.now().strftime('%H%M%S')}.xml")
+        xml = self.d.dump_hierarchy()
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(xml)
+        return path
+
     def screenshot(self, name=None):
         if not name:
             name = datetime.now().strftime("fail_%H%M%S")

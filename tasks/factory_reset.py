@@ -7,6 +7,44 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from lib.device import Device
 from lib.logger import Logger
 
+SECTIONS = [
+    "System",
+    "About phone",
+    "About device",
+    "General management",
+    "Additional Settings",
+    "System & updates",
+    "System settings",
+    "Backup",
+    "Reset",
+    "Privacy",
+]
+
+RESET_LABELS = [
+    "Reset phone",
+    "Factory data reset",
+    "Factory reset",
+    "Reset options",
+    "Back up and reset",
+    "Backup & reset",
+    "Reset",
+]
+
+ERASE_LABELS = [
+    "Erase all data",
+    "Erase everything",
+    "Erase all",
+]
+
+CONFIRM_LABELS = [
+    "Erase data",
+    "Erase all data",
+    "Erase everything",
+    "Confirm",
+    "Yes",
+    "OK",
+]
+
 
 class FactoryResetTask:
     name = "factory-reset"
@@ -19,9 +57,8 @@ class FactoryResetTask:
             device = Device(log_dir=".")
 
         logger.info("=== Factory Reset Task ===")
-        steps = 5
+        steps = 6
 
-        # Step 1: Connect
         logger.step(1, steps, "Connecting to device...")
         try:
             device.connect()
@@ -30,16 +67,26 @@ class FactoryResetTask:
             return False
         logger.info(f"Device: {device.width}x{device.height}")
 
-        # Step 2: Navigate to Factory Reset
         logger.step(2, steps, "Navigating to factory reset...")
-        self._navigate_to_reset(device, logger)
+        if not self._navigate_to_reset(device, logger):
+            logger.error("Could not find factory reset option.")
+            device.screenshot("navigation_failed")
+            return False
 
-        # Step 3: Confirm and trigger reset
-        logger.step(3, steps, "Triggering factory reset...")
-        self._trigger_reset(device, logger)
+        logger.step(3, steps, "Tapping Erase all data...")
+        if not device.find_and_click_all(ERASE_LABELS, timeout=5):
+            logger.error("Could not find Erase all data button.")
+            device.screenshot("no_erase_button")
+            return False
+        time.sleep(3)
 
-        # Step 4: Wait for reboot
-        logger.step(4, steps, "Waiting for device to reboot...")
+        logger.step(4, steps, "Triggering factory reset...")
+        try:
+            self._trigger_reset(device, logger)
+        except Exception as e:
+            logger.info(f"Device disconnected: {e}. Reset was triggered!")
+
+        logger.step(5, steps, "Waiting for device to reboot...")
         logger.info("Device should disconnect now. Waiting for wipe + reboot...")
         try:
             device.reconnect(timeout=300)
@@ -48,8 +95,7 @@ class FactoryResetTask:
             logger.error("Device did not reconnect within 5 minutes")
             return False
 
-        # Step 5: Skip setup wizard
-        logger.step(5, steps, "Skipping setup wizard...")
+        logger.step(6, steps, "Skipping setup wizard...")
         self._skip_setup(device, logger)
 
         device.go_home()
@@ -57,68 +103,58 @@ class FactoryResetTask:
         return True
 
     def _navigate_to_reset(self, d, log):
-        log.info("Waking device...")
         d.wake()
+        time.sleep(1)
+
+        # Force-stop to clear back stack — ensures we always start fresh
+        log.info("Force-stopping Settings...")
+        d.d.shell(["am", "force-stop", "com.android.settings"])
         time.sleep(2)
 
-        log.info("Opening Settings...")
+        log.info("Opening fresh Settings...")
         d.d.app_start("com.android.settings")
+        time.sleep(2)
+
+        d.d.shell(["wm", "dismiss-keyguard"])
+        d.d.screen_on()
         time.sleep(3)
 
-        log.info("Searching for reset options...")
-        found = d.find_and_click_all([
-            "Back up & reset",
-            "Backup & reset",
-            "Reset options",
-            "Reset phone",
-            "Factory reset",
-            "Erase all data",
-            "System",
-            "Additional settings",
-            "Additional Settings",
-        ], timeout=5)
-
-        if not found:
-            log.info("Scrolling down to find reset options...")
-            for _ in range(5):
-                d.swipe_down()
-                time.sleep(1)
-                if d.find_and_click_all([
-                    "Back up & reset",
-                    "Reset options",
-                    "Factory reset",
-                    "Erase all data",
-                ], timeout=2):
-                    break
-
+        # Tap the search bar
+        log.info("Tapping Search bar...")
+        d.d(text="Search").click()
         time.sleep(2)
-        d.find_and_click_all([
-            "Back up & reset",
-            "Reset options",
-            "Factory reset",
-            "Erase all data (factory reset)",
-            "Erase all data",
-            "Reset phone",
-        ], timeout=5)
+
+        # Type "reset phone"
+        log.info('Typing "reset phone"...')
+        d.d.send_keys("reset phone")
+        time.sleep(3)
+
+        # Tap the first search result containing reset-related text
+        log.info("Opening search result...")
+        for label in RESET_LABELS:
+            el = d.d(text=label)
+            if el.wait(timeout=2):
+                el.click()
+                time.sleep(3)
+                log.info(f"Opened: {label}")
+                return True
+
+        log.warning("Could not find reset option via search.")
+        d.dump_ui()
+        return False
 
     def _trigger_reset(self, d, log):
-        confirm_texts = [
-            "Erase all data",
-            "Erase everything",
-            "Reset phone",
-            "Reset",
-            "Confirm",
-            "Delete all",
-            "Clear all",
-        ]
-        found = d.find_and_click_all(confirm_texts, timeout=5)
-        if not found:
-            log.info("Trying bottom-center tap as fallback...")
-            d.d.click(d.width // 2, int(d.height * 0.85))
-            time.sleep(2)
-            d.d.click(d.width // 2, int(d.height * 0.84))
+        log.info("Confirming factory reset...")
+        for attempt in range(3):
+            found = d.find_and_click_all(CONFIRM_LABELS, timeout=4)
+            if found:
+                log.info(f"Tapped confirmation ({attempt + 1}/3)")
+                time.sleep(3)
+            else:
+                log.info(f"No button found on attempt {attempt + 1}, tapping bottom-center...")
+                d.d.click(d.width // 2, int(d.height * 0.84))
+                time.sleep(3)
 
-        time.sleep(3)
         log.info("Factory reset command sent. Device should reboot.")
 
     def _skip_setup(self, d, log):
@@ -183,3 +219,15 @@ class FactoryResetTask:
     def _is_home(self, d):
         focus = d.current_focus().lower()
         return any(x in focus for x in ["launcher", "home", "desktop"])
+
+    def _get_clickable_texts(self, xml):
+        import re
+        texts = re.findall(r'text="([^"]+)"', xml)
+        seen = set()
+        result = []
+        for t in texts:
+            t = t.strip()
+            if t and len(t) > 1 and t not in seen:
+                seen.add(t)
+                result.append(t)
+        return result
