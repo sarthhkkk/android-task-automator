@@ -165,7 +165,7 @@ class EnableDebuggingTask:
         log.info("  2. Go to 'About Phone'")
         log.info("  3. Tap 'Build Number' 7 times")
         log.info("     (You'll see 'You are now a developer!')")
-        log.info("  4. Go back → 'System & Updates' → 'Developer Options'")
+        log.info("  4. Go back -> 'System & Updates' -> 'Developer Options'")
         log.info("  5. Enable 'USB Debugging'")
         log.info("  6. Tap 'OK' to confirm")
         log.info("  7. Connect USB cable (if not already connected)")

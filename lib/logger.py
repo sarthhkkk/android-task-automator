@@ -20,7 +20,10 @@ class Logger:
         line = f"{self._timestamp()} [{level}] {msg}"
         with open(self.log_file, "a", encoding="utf-8") as f:
             f.write(line + "\n")
-        print(line, file=sys.stdout, flush=True)
+        try:
+            print(line, file=sys.stdout, flush=True)
+        except UnicodeEncodeError:
+            print(line.encode("utf-8", errors="replace").decode("utf-8", errors="replace"), file=sys.stdout, flush=True)
 
     def info(self, msg):
         self._write("INFO", msg)
