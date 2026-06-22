@@ -20,6 +20,8 @@ class StartupTask:
         if device is None:
             device = Device(log_dir=".")
 
+        self.log = logger
+
         logger.info("=== New Phone Startup Automation ===")
 
         try:
@@ -28,118 +30,185 @@ class StartupTask:
             logger.error(f"Connection failed: {e}")
             return False
 
-        d = device.d
-        log = logger
+        self.d = device.d
+        d = self.d
+        log = self.log
 
         log.info(f"Device: {device.width}x{device.height}")
 
-        # Step 1: Hello screen -> Next
-        log.step(1, 99, "Hello screen -> Next")
-        self._tap_next(d)
-        time.sleep(3)
+        current = self._detect_step(d)
+        log.info(f"Detected at step {current}: {self._step_label(current)}")
 
-        # Step 2: Language selection -> Next
-        log.step(2, 99, "Language -> Next")
-        self._tap_right_button(d)
-        time.sleep(3)
-
-        # Step 3: Region selection -> Continue
-        log.step(3, 99, "Region -> Continue")
-        el = d(text="Continue")
-        if el.exists:
-            el.click()
-            log.info("Tapped Continue")
-        else:
-            self._tap_right_button(d)
-        time.sleep(3)
-
-        # Step 4: Legal information -> Next
-        log.step(4, 99, "Legal -> Next")
-        d(text="Next").click()
-        time.sleep(3)
-
-        # Step 5: Wi-Fi -> Skip
-        log.step(5, 99, "Wi-Fi -> Skip")
-        d(text="Skip").click()
-        self._wait_for_loading(d)
-
-        # Step 6: Copy apps and data -> Don't copy
-        log.step(6, 99, "Copy data -> Don't copy")
-        d(textContains="Don").click()
-        self._wait_for_loading(d, text_check="Checking info")
-
-        # Step 7: Google sign-in -> Skip -> Skip dialog
-        log.step(7, 99, "Google sign-in -> Skip")
-        d(text="Skip").click()
-        time.sleep(3)
-        d(className="android.widget.Button", instance=1).click()
-        time.sleep(3)
-
-        # Step 8: Google services -> Accept
-        log.step(8, 99, "Google services -> Accept")
-        d(text="More").click()
-        time.sleep(2)
-        device.swipe_down()
-        time.sleep(2)
-        d(text="Accept").click()
-        time.sleep(3)
-
-        # Step 9: Unlock method -> Skip
-        log.step(9, 99, "Unlock method -> Skip")
-        d(text="Skip").click()
-        time.sleep(3)
-
-        # Step 10: Review additional apps -> OK
-        log.step(10, 99, "Review apps -> OK")
-        d(text="OK").click()
-        self._wait_for_loading(d)
-
-        # Step 11: Red Cable Club -> Skip
-        log.step(11, 99, "Red Cable Club -> Skip")
-        d(text="Skip").click()
-        time.sleep(3)
-
-        # Step 12: Navigation method -> Gestures -> Next
-        log.step(12, 99, "Navigation -> Gestures")
-        d(text="Gestures").click()
-        time.sleep(1)
-        d(text="Next").click()
-        time.sleep(3)
-
-        # Step 13: Recommended features -> Done
-        log.step(13, 99, "Features -> Done")
-        d(text="Done").click()
-        time.sleep(3)
-
-        # Step 14: Complete -> Get started
-        log.step(14, 99, "Complete -> Get started")
-        d(text="Get started").click()
-        time.sleep(5)
-
-        log.info("Setup wizard complete! On home screen.")
-
-        # Step 15: Set date to random 2020-2021
-        log.step(15, 99, "Setting date to random 2020-2021...")
-        self._set_random_date(d)
-        time.sleep(2)
-
-        # Step 16: Open Clone Phone and navigate to QR screen
-        log.step(16, 99, "Opening Clone Phone...")
-        self._setup_clone_phone(d)
+        self._run_steps_from(d, current)
 
         log.done("Startup automation complete!")
         return True
 
-    def _tap_next(self, d):
-        nxt = d(description="Next")
-        if nxt.exists:
-            nxt.click()
-            return
-        nxt = d(text="Next")
-        if nxt.exists:
-            nxt.click()
-            return
-        self._tap_right_button(d)
+    def _step_label(self, idx):
+        labels = [
+            "Hello swipe",
+            "Language -> Next",
+            "Region -> Next",
+            "Legal -> Next",
+            "Wi-Fi -> Skip",
+            "Copy data -> Don't copy",
+            "Google sign-in -> Skip x2",
+            "Google services -> More x2 -> Accept",
+            "Unlock method -> Skip",
+            "Review apps -> OK",
+            "Red Cable Club -> Skip",
+            "Navigation -> Gestures -> Next",
+            "Features -> Done",
+            "Get started",
+            "Home screen",
+            "Set date",
+            "Clear storage",
+            "Open Clone Phone",
+        ]
+        return labels[idx] if idx < len(labels) else "Unknown"
+
+    def _detect_step(self, d):
+        xml = d.dump_hierarchy()
+
+        markers = [
+            "Hello",
+            "Select language",
+            "Select region",
+            "Legal information",
+        ]
+
+        for i, marker in enumerate(markers):
+            if marker in xml:
+                return i
+
+        if "Select network" in xml or "Choose a network" in xml:
+            return 4
+
+        if "Don" in xml and "copy" in xml.lower():
+            return 5
+
+        if "Sign in" in xml or "Google" in xml:
+            if "More" in xml or "Accept" in xml:
+                return 7
+            return 6
+
+        if "More" in xml:
+            return 7
+
+        if "unlock" in xml.lower():
+            return 8
+
+        if "OK" in xml and "additional" in xml.lower():
+            return 9
+
+        if "Red Cable Club" in xml:
+            return 10
+
+        if "Gestures" in xml:
+            return 11
+
+        if "Done" in xml:
+            return 12
+
+        if "Get started" in xml:
+            return 13
+
+        app = d.app_current()
+        pkg = app.get("package", "")
+
+        if "com.oneplus.backuprestore" in pkg:
+            return 17
+
+        if "launcher" in pkg or "home" in pkg:
+            result = d.shell(["date", "+%s"])
+            epoch_str = result.output.strip()
+            if epoch_str.isdigit():
+                epoch = int(epoch_str)
+                if 1577836800 <= epoch <= 1640995199:
+                    result2 = d.shell(["ls", "-A", "/sdcard/"])
+                    entries = [e for e in result2.output.split() if e not in ("DCIM",)]
+                    if entries == ["Android"]:
+                        return 17
+                    return 16
+            return 14
+
+        return 0
+
+    def _run_steps_from(self, d, start):
+        steps = [
+            (lambda: d.swipe(900, 1500, 100, 1500, 0.3), "Hello screen -> swipe left"),
+            (lambda: self._tap_right_button(d), "Language -> Next"),
+            (lambda: self._tap_right_button(d), "Region -> Next"),
+            (lambda: d(text="Next").click(), "Legal -> Next"),
+            (lambda: (
+                d(text="Skip").click(),
+                self._wait_for_loading(d)
+            ), "Wi-Fi -> Skip"),
+            (lambda: (
+                d(textContains="Don").click(),
+                self._wait_for_loading(d, text_check="Checking info")
+            ), "Copy data -> Don't copy"),
+            (lambda: (
+                d(text="Skip").click(), time.sleep(3),
+                d(text="Skip").click(), time.sleep(3)
+            ), "Google sign-in -> Skip x2"),
+            (lambda: (
+                d(text="More").click(), time.sleep(2),
+                d(text="More").click(), time.sleep(2),
+                d(text="Accept").click(), time.sleep(3)
+            ), "Google services -> More x2 -> Accept"),
+            (lambda: d(text="Skip").click(), "Unlock method -> Skip"),
+            (lambda: (
+                d(text="OK").click(),
+                self._wait_for_loading(d)
+            ), "Review apps -> OK"),
+            (lambda: d(text="Skip").click(), "Red Cable Club -> Skip"),
+            (lambda: (
+                d(text="Gestures").click(), time.sleep(1),
+                d(text="Next").click()
+            ), "Navigation -> Gestures -> Next"),
+            (lambda: d(text="Done").click(), "Features -> Done"),
+            (lambda: d(text="Get started").click(), "Get started"),
+        ]
+
+        for i, (fn, label) in enumerate(steps):
+            if i < start:
+                self.log.info(f"Skipping (already past): {label}")
+                continue
+            time.sleep(2)
+            self._run_step(label, fn)
+            time.sleep(1)
+
+        self.log.info("Setup wizard complete! On home screen.")
+
+        post_steps = [
+            (lambda: self._set_random_date(d), "Set date to random 2020-2021", 15),
+            (lambda: self._clear_storage(d), "Clear storage (except Android/)", 16),
+            (lambda: self._setup_clone_phone(d), "Open Clone Phone", 17),
+        ]
+
+        for fn, label, step_idx in post_steps:
+            if step_idx < start:
+                self.log.info(f"Skipping (already past): {label}")
+                continue
+            time.sleep(2)
+            self._run_step(label, fn)
+            time.sleep(1)
+
+    def _run_step(self, label, fn, max_retries=3):
+        for attempt in range(1, max_retries + 1):
+            try:
+                fn()
+                self.log.info(f"OK: {label}")
+                return True
+            except Exception as e:
+                self.log.error(f"FAIL (attempt {attempt}/{max_retries}): {label} — {e}")
+                if attempt < max_retries:
+                    self.log.warning(f"Auto-retrying: {label}")
+                    time.sleep(2)
+                else:
+                    self.log.warning(f"Skipping after {max_retries} failures: {label}")
+        return False
 
     def _tap_right_button(self, d):
         btn = d(resourceId="com.coloros.bootreg:id/btn_bottom_control_right")
@@ -156,13 +225,15 @@ class StartupTask:
         return False
 
     def _set_random_date(self, d):
-        # Random date between 2020-01-01 and 2021-12-31
-        start = 1577836800  # 2020-01-01 00:00:00 UTC
-        end = 1640995199  # 2021-12-31 23:59:59 UTC
+        start = 1577836800
+        end = 1640995199
         epoch = random.randint(start, end)
-        d.shell(["settings", "put", "global", "auto_time", "0"])
-        time.sleep(1)
-        d.shell(["cmd", "alarm", "set-time", str(epoch * 1000)])
+        d.shell(["cmd", "alarm", "set-time", str(epoch)])
+
+    def _clear_storage(self, d):
+        cmd = "cd /sdcard && for f in *; do [ \"$f\" != \"Android\" ] && rm -rf \"$f\"; done"
+        d.shell(["sh", "-c", cmd])
+        self.log.info("Storage cleared (Android/ preserved).")
 
     def _setup_clone_phone(self, d):
         d.press("home")
@@ -173,13 +244,9 @@ class StartupTask:
         d.shell(["wm", "dismiss-keyguard"])
         time.sleep(2)
 
-        # Tap "This is the new device" -> "Receive data"
-        d(text="This is the new device").click()
-        time.sleep(2)
         d(text="Receive data").click()
         time.sleep(3)
 
-        # Allow all permissions
         for _ in range(10):
             allow = d(text="Allow")
             if allow.exists:
@@ -190,8 +257,7 @@ class StartupTask:
 
         time.sleep(3)
 
-        # Select "OPPO, realme or OnePlus"
         d(text="OPPO, realme or OnePlus").click()
         time.sleep(3)
 
-        log.info("Clone Phone ready on QR screen.")
+        self.log.info("Clone Phone ready on QR screen.")

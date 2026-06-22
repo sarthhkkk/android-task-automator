@@ -184,6 +184,8 @@ class FactoryResetTask:
             ("Next", d.find_and_click, ["Next"]),
             ("Done", d.find_and_click, ["Done"]),
             ("Get started", d.find_and_click, ["Get started"]),
+            ("Don't copy", d.find_and_click, ["Don't copy"]),
+            ("Copy", d.find_and_click, ["Copy"]),
             ("Set up later", d.find_and_click, ["Set up later"]),
             ("Remind me later", d.find_and_click, ["Remind me later"]),
             ("Skip anyway", d.find_and_click, ["Skip anyway"]),
